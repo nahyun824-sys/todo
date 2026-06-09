@@ -160,6 +160,11 @@
     .del-btn{background:none;border:none;color:#ccc;font-size:17px;cursor:pointer;padding:1px 3px;border-radius:5px;flex-shrink:0;}
     .del-btn:hover{color:var(--red);}
     .edit-hint{font-size:10px;color:#ccc;text-align:center;padding:4px 0;flex-shrink:0;}
+    /* 드래그 핸들 */
+    .drag-handle{color:#d0d5dd;font-size:15px;cursor:grab;flex-shrink:0;padding:0 3px;user-select:none;touch-action:none;line-height:1;}
+    .drag-handle:hover{color:#9ca3af;}
+    .drag-item.is-dragging{opacity:.35;}
+    .drag-placeholder{border-radius:10px;background:#eef2ff;border:2px dashed #818cf8;flex-shrink:0;}
     .empty-msg{text-align:center;color:#ccc;font-size:13px;padding:20px 0;}
 
     /* Events tab */
@@ -547,6 +552,64 @@
   }
   function stopListeners(){ unsubs.forEach(u => u()); unsubs = []; }
 
+  // ── Drag-to-reorder ──
+  function setupDragSort(listEl, getArr, onDrop) {
+    let dragEl = null, placeholder = null, fromIdx = -1, capturedId = null;
+    listEl.addEventListener('pointerdown', e => {
+      if (!e.target.closest('[data-drag-handle]')) return;
+      const row = e.target.closest('.drag-item');
+      if (!row) return;
+      e.preventDefault();
+      listEl.setPointerCapture(e.pointerId);
+      capturedId = e.pointerId;
+      fromIdx = parseInt(row.dataset.idx);
+      dragEl = row;
+      dragEl.classList.add('is-dragging');
+      placeholder = document.createElement('div');
+      placeholder.className = 'drag-placeholder';
+      placeholder.style.height = row.offsetHeight + 'px';
+      row.after(placeholder);
+    });
+    listEl.addEventListener('pointermove', e => {
+      if (!dragEl || e.pointerId !== capturedId) return;
+      e.preventDefault();
+      const peers = [...listEl.querySelectorAll('.drag-item:not(.is-dragging)')];
+      let placed = false;
+      for (const peer of peers) {
+        const r = peer.getBoundingClientRect();
+        if (e.clientY < r.top + r.height / 2) {
+          listEl.insertBefore(placeholder, peer);
+          placed = true; break;
+        }
+      }
+      if (!placed) listEl.appendChild(placeholder);
+    });
+    function endDrag(e) {
+      if (!dragEl || (e && e.pointerId !== capturedId)) return;
+      dragEl.classList.remove('is-dragging');
+      let toIdx = 0;
+      for (const child of listEl.children) {
+        if (child === placeholder) break;
+        if (child.classList.contains('drag-item')) toIdx++;
+      }
+      placeholder.remove(); placeholder = null;
+      if (fromIdx !== toIdx) {
+        const arr = getArr();
+        const [moved] = arr.splice(fromIdx, 1);
+        arr.splice(toIdx, 0, moved);
+        onDrop();
+      }
+      dragEl = null; fromIdx = -1; capturedId = null;
+    }
+    listEl.addEventListener('pointerup', endDrag);
+    listEl.addEventListener('pointercancel', () => {
+      if (!dragEl) return;
+      dragEl.classList.remove('is-dragging');
+      if (placeholder) { placeholder.remove(); placeholder = null; }
+      dragEl = null; fromIdx = -1; capturedId = null;
+    });
+  }
+
   function saveDate(key) {
     if (isReadOnly()) return;
     return db.collection('users').doc(uid()).collection('dates').doc(key).set({
@@ -721,6 +784,18 @@
   }
   document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
 
+  // 드래그 정렬 초기화
+  setupDragSort(
+    document.getElementById('todoList'),
+    () => calTodos[activeKey] || [],
+    () => { saveDate(activeKey); renderTodoList(); }
+  );
+  setupDragSort(
+    document.getElementById('eventList'),
+    () => calEvents[activeKey] || [],
+    () => { saveDate(activeKey); renderEventList(); renderCalendar(); }
+  );
+
   // ── Todos ──
   function renderTodoList() {
     const list  = document.getElementById('todoList');
@@ -728,7 +803,17 @@
     if (items.length === 0) { list.innerHTML = '<div class="empty-msg">아직 할일이 없어요</div>'; return; }
     list.innerHTML = '';
     items.forEach((item, idx) => {
-      const row = document.createElement('div'); row.className = 'todo-item';
+      const row = document.createElement('div');
+      row.className = 'todo-item drag-item';
+      row.dataset.idx = idx;
+
+      if (!isReadOnly()) {
+        const handle = document.createElement('span');
+        handle.className = 'drag-handle';
+        handle.textContent = '⠿';
+        handle.setAttribute('data-drag-handle', '');
+        row.appendChild(handle);
+      }
 
       const check = document.createElement('div');
       check.className = 'todo-check' + (item.done ? ' checked' : '');
@@ -746,19 +831,8 @@
         del.addEventListener('click', () => deleteTodo(idx));
         row.appendChild(del);
 
-        // 더블클릭 (PC)
+        // 더블클릭으로 인라인 편집
         text.addEventListener('dblclick', e => { e.preventDefault(); editTodoInline(idx, row); });
-
-        // 꾹 누르기 (모바일)
-        row.addEventListener('touchstart', () => {
-          longPressTimer = setTimeout(() => {
-            longPressTimer = null;
-            editTodoInline(idx, row);
-          }, 600);
-        }, { passive: true });
-        row.addEventListener('touchend',   () => clearTimeout(longPressTimer));
-        row.addEventListener('touchmove',  () => clearTimeout(longPressTimer));
-        row.addEventListener('touchcancel',() => clearTimeout(longPressTimer));
       }
       list.appendChild(row);
     });
@@ -819,9 +893,18 @@
     const events = calEvents[activeKey] || [];
     if (events.length === 0) { list.innerHTML = '<div class="empty-msg">등록된 일정이 없어요</div>'; return; }
     list.innerHTML = '';
-    const sorted = [...events].sort((a, b) => (a.time || '99:99').localeCompare(b.time || '99:99'));
-    sorted.forEach(ev => {
-      const row = document.createElement('div'); row.className = 'event-row';
+    events.forEach((ev, idx) => {
+      const row = document.createElement('div');
+      row.className = 'event-row drag-item';
+      row.dataset.idx = idx;
+
+      if (!isReadOnly()) {
+        const handle = document.createElement('span');
+        handle.className = 'drag-handle';
+        handle.textContent = '⠿';
+        handle.setAttribute('data-drag-handle', '');
+        row.appendChild(handle);
+      }
 
       const timeBadge = document.createElement('span');
       timeBadge.className = 'event-time-badge' + (ev.time ? '' : ' no-time');
@@ -832,7 +915,6 @@
       row.appendChild(titleEl);
 
       if (!isReadOnly()) {
-        // 더블클릭으로 제목 편집
         titleEl.addEventListener('dblclick', e => { e.preventDefault(); editEventInline(ev, row, timeBadge, titleEl); });
 
         const del = document.createElement('button'); del.className = 'del-btn'; del.textContent = '×';
