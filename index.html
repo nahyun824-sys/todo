@@ -163,8 +163,7 @@
     /* 드래그 핸들 */
     .drag-handle{color:#d0d5dd;font-size:15px;cursor:grab;flex-shrink:0;padding:0 3px;user-select:none;touch-action:none;line-height:1;}
     .drag-handle:hover{color:#9ca3af;}
-    .drag-item.is-dragging{opacity:.35;}
-    .drag-placeholder{border-radius:10px;background:#eef2ff;border:2px dashed #818cf8;flex-shrink:0;}
+    .drag-item.is-dragging{opacity:.5;background:#eef2ff;border-radius:10px;box-shadow:0 4px 14px rgba(99,102,241,.25);z-index:10;position:relative;}
     .empty-msg{text-align:center;color:#ccc;font-size:13px;padding:20px 0;}
 
     /* Events tab */
@@ -554,46 +553,45 @@
 
   // ── Drag-to-reorder ──
   function setupDragSort(listEl, getArr, onDrop) {
-    let dragEl = null, placeholder = null, fromIdx = -1, capturedId = null;
+    let dragEl = null, fromIdx = -1, capturedId = null;
+
+    // passive:false 가 필수 — 없으면 모바일에서 preventDefault 무시됨
     listEl.addEventListener('pointerdown', e => {
       if (!e.target.closest('[data-drag-handle]')) return;
       const row = e.target.closest('.drag-item');
       if (!row) return;
       e.preventDefault();
-      listEl.setPointerCapture(e.pointerId);
+      try { listEl.setPointerCapture(e.pointerId); } catch(_) {}
       capturedId = e.pointerId;
       fromIdx = parseInt(row.dataset.idx);
       dragEl = row;
       dragEl.classList.add('is-dragging');
-      placeholder = document.createElement('div');
-      placeholder.className = 'drag-placeholder';
-      placeholder.style.height = row.offsetHeight + 'px';
-      row.after(placeholder);
-    });
+      listEl.style.touchAction = 'none'; // 드래그 중 스크롤 막기
+    }, { passive: false });
+
     listEl.addEventListener('pointermove', e => {
       if (!dragEl || e.pointerId !== capturedId) return;
       e.preventDefault();
+      // 비드래그 아이템들 위치 기준으로 dragEl을 실제로 DOM 이동
       const peers = [...listEl.querySelectorAll('.drag-item:not(.is-dragging)')];
       let placed = false;
       for (const peer of peers) {
         const r = peer.getBoundingClientRect();
         if (e.clientY < r.top + r.height / 2) {
-          listEl.insertBefore(placeholder, peer);
+          if (peer.previousSibling !== dragEl) listEl.insertBefore(dragEl, peer);
           placed = true; break;
         }
       }
-      if (!placed) listEl.appendChild(placeholder);
-    });
+      if (!placed && listEl.lastElementChild !== dragEl) listEl.appendChild(dragEl);
+    }, { passive: false });
+
     function endDrag(e) {
       if (!dragEl || (e && e.pointerId !== capturedId)) return;
       dragEl.classList.remove('is-dragging');
-      let toIdx = 0;
-      for (const child of listEl.children) {
-        if (child === placeholder) break;
-        if (child.classList.contains('drag-item')) toIdx++;
-      }
-      placeholder.remove(); placeholder = null;
-      if (fromIdx !== toIdx) {
+      listEl.style.touchAction = '';
+      const items = [...listEl.querySelectorAll('.drag-item')];
+      const toIdx = items.indexOf(dragEl);
+      if (fromIdx !== toIdx && toIdx !== -1) {
         const arr = getArr();
         const [moved] = arr.splice(fromIdx, 1);
         arr.splice(toIdx, 0, moved);
@@ -601,11 +599,12 @@
       }
       dragEl = null; fromIdx = -1; capturedId = null;
     }
+
     listEl.addEventListener('pointerup', endDrag);
     listEl.addEventListener('pointercancel', () => {
       if (!dragEl) return;
       dragEl.classList.remove('is-dragging');
-      if (placeholder) { placeholder.remove(); placeholder = null; }
+      listEl.style.touchAction = '';
       dragEl = null; fromIdx = -1; capturedId = null;
     });
   }
