@@ -758,6 +758,10 @@
       cell.addEventListener('click', () => openModal(viewYear, viewMonth, d));
       grid.appendChild(cell);
     }
+    // 마지막 주의 남는 칸도 채워야 격자가 끝까지 이어짐 (없으면 오른쪽 아래가 빈 여백처럼 보임)
+    for (let i = firstDay + lastDate; i < calRows * 7; i++) {
+      const e = document.createElement('div'); e.className = 'day-cell empty'; grid.appendChild(e);
+    }
     fitCalendarGrid();
   }
 
