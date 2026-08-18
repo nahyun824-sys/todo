@@ -696,13 +696,18 @@
     });
   }
 
-  // 창 크기가 바뀌어 칸 높이가 달라지면 표시 개수도 다시 계산
+  // 창 크기가 바뀌어 칸 높이가 달라지면 표시 개수도 다시 계산.
+  // ResizeObserver는 창 크기 외의 레이아웃 변화(배너 표시 등)까지 잡아주고,
+  // resize 이벤트는 그 백업 — 둘 다 등록해도 계산이 멱등이라 안전함.
   if (window.ResizeObserver) {
     new ResizeObserver(() => fitCellItems())
       .observe(document.getElementById('daysGrid'));
-  } else {
-    let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(fitCellItems, 120); });
   }
+  let refitTimer;
+  window.addEventListener('resize', () => {
+    clearTimeout(refitTimer);
+    refitTimer = setTimeout(fitCellItems, 120);
+  });
 
   function renderCalendar() {
     document.getElementById('calTitle').textContent = `${viewYear}년 ${MONTHS[viewMonth]}`;
