@@ -76,11 +76,11 @@
     /* 셀 내부 아이템 — 모두 ellipsis */
     .cell-kws{display:flex;flex-wrap:nowrap;gap:2px;overflow:hidden;flex-shrink:0;}
     .cell-kw{font-size:9px;padding:1px 5px;border-radius:4px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:70px;flex-shrink:0;}
-    .cell-events{display:flex;flex-direction:column;gap:2px;overflow:hidden;}
+    .cell-events{display:flex;flex-direction:column;gap:2px;overflow:hidden;flex-shrink:0;}
     .cell-event{display:flex;align-items:center;gap:3px;font-size:10px;padding:2px 5px;border-radius:4px;background:#e8f4fd;color:#1a5276;overflow:hidden;flex-shrink:0;}
     .cell-event-time{font-weight:700;white-space:nowrap;flex-shrink:0;}
     .cell-event-title{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;flex:1;}
-    .cell-todos{display:flex;flex-direction:column;gap:2px;overflow:hidden;}
+    .cell-todos{display:flex;flex-direction:column;gap:2px;overflow:hidden;flex-shrink:0;}
     .cell-todo{display:flex;align-items:flex-start;gap:3px;font-size:10px;padding:2px 4px;border-radius:4px;background:#f0f2f5;flex-shrink:0;}
     .cell-todo.done-item{background:#f0fff4;}
     .cell-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0;background:var(--red);margin-top:3px;}
@@ -662,6 +662,48 @@
     if (grid) grid.style.gridTemplateRows = `repeat(${calRows}, 1fr)`;
   }
 
+  // 칸에 실제로 들어가는 만큼만 항목을 보여줌 — 칸이 커지면 더 많이 보임.
+  // 개수를 계산하지 않고 실측하는 이유: 할 일 텍스트가 여러 줄로 줄바꿈될 수 있어서.
+  function fitCellItems() {
+    const grid = document.getElementById('daysGrid');
+    if (!grid || !grid.offsetParent) return;
+    grid.querySelectorAll('.day-cell').forEach(cell => {
+      const items = cell._items;
+      if (!items || !items.length) return;
+      const more = cell._moreEl;
+
+      // 매번 전부 보이게 되돌린 뒤 다시 계산 (창 크기가 커졌을 때 복구되도록)
+      items.forEach(el => { el.style.display = ''; });
+      more.style.display = 'none';
+
+      const padBottom = parseFloat(getComputedStyle(cell).paddingBottom) || 0;
+      const limit = cell.getBoundingClientRect().bottom - padBottom;
+      const overflows = el => el.getBoundingClientRect().bottom > limit + 0.5;
+
+      if (!overflows(items[items.length - 1])) return;   // 전부 들어감
+
+      // 잘릴 항목이 있으면 "+N개 더" 줄 높이만큼 여유를 두고 다시 계산
+      more.textContent = '+0개 더';
+      more.style.display = '';
+      const limit2 = limit - more.getBoundingClientRect().height;
+
+      let cut = items.length;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].getBoundingClientRect().bottom > limit2 + 0.5) { cut = i; break; }
+      }
+      for (let i = cut; i < items.length; i++) items[i].style.display = 'none';
+      more.textContent = `+${items.length - cut}개 더`;
+    });
+  }
+
+  // 창 크기가 바뀌어 칸 높이가 달라지면 표시 개수도 다시 계산
+  if (window.ResizeObserver) {
+    new ResizeObserver(() => fitCellItems())
+      .observe(document.getElementById('daysGrid'));
+  } else {
+    let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(fitCellItems, 120); });
+  }
+
   function renderCalendar() {
     document.getElementById('calTitle').textContent = `${viewYear}년 ${MONTHS[viewMonth]}`;
     const grid = document.getElementById('daysGrid');
@@ -716,11 +758,13 @@
         cell.appendChild(ic);
       }
 
-      // 일정 (최대 2개)
+      // 일정·할 일은 일단 전부 그려두고, 나중에 fitCellItems()가 칸 높이에 맞춰 잘라냄
+      const cellItems = [];
+
       const events = calEvents[key] || [];
       if (events.length > 0) {
         const evEl = document.createElement('div'); evEl.className = 'cell-events';
-        events.slice(0, 2).forEach(ev => {
+        events.forEach(ev => {
           const row = document.createElement('div'); row.className = 'cell-event';
           if (ev.time) {
             const t = document.createElement('span'); t.className = 'cell-event-time'; t.textContent = ev.time;
@@ -729,30 +773,33 @@
           const ti = document.createElement('span'); ti.className = 'cell-event-title'; ti.textContent = ev.title;
           row.appendChild(ti);
           evEl.appendChild(row);
+          cellItems.push(row);
         });
         cell.appendChild(evEl);
       }
 
-      // 할 일 (남은 공간에)
       const todos = calTodos[key] || [];
       if (todos.length > 0) {
         const tdEl = document.createElement('div'); tdEl.className = 'cell-todos';
-        const maxShow = events.length > 0 ? 2 : 3;
-        todos.slice(0, maxShow).forEach(item => {
+        todos.forEach(item => {
           const row = document.createElement('div');
           row.className = 'cell-todo' + (item.done ? ' done-item' : '');
           const dot = document.createElement('div'); dot.className = 'cell-dot';
           const txt = document.createElement('div'); txt.className = 'cell-todo-text'; txt.textContent = item.text;
           row.appendChild(dot); row.appendChild(txt);
           tdEl.appendChild(row);
+          cellItems.push(row);
         });
-        const totalExtra = todos.length + events.length - maxShow - Math.min(events.length, 2);
-        if (totalExtra > 0) {
-          const more = document.createElement('div'); more.className = 'cell-more';
-          more.textContent = `+${totalExtra}개 더`;
-          tdEl.appendChild(more);
-        }
         cell.appendChild(tdEl);
+      }
+
+      if (cellItems.length > 0) {
+        const more = document.createElement('div');
+        more.className = 'cell-more';
+        more.style.display = 'none';
+        cell.appendChild(more);       // 칸의 마지막 자식이어야 잘린 항목 바로 아래에 붙음
+        cell._items = cellItems;
+        cell._moreEl = more;
       }
 
       cell.addEventListener('click', () => openModal(viewYear, viewMonth, d));
@@ -763,6 +810,7 @@
       const e = document.createElement('div'); e.className = 'day-cell empty'; grid.appendChild(e);
     }
     fitCalendarGrid();
+    fitCellItems();
   }
 
   document.getElementById('prevBtn').addEventListener('click', () => {
