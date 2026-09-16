@@ -111,6 +111,12 @@
       .calendar-wrap{border-radius:0;}
       .days-grid{border-left:none;}
     }
+    /* 모바일은 입력창 글자가 16px 미만이면 포커스할 때 브라우저가 화면을 확대해버림 —
+       모달 안 입력창들만 16px로 올려서 막는다 (확대만 막는 목적이라 모바일에서만 적용). */
+    @media (max-width:600px){
+      .add-input, .time-input, .todo-edit-input, .event-edit-input,
+      .memo-textarea, .kw-add-input{ font-size:16px; }
+    }
 
     /* ── Memos view ── */
     .memos-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
@@ -130,6 +136,11 @@
     .memo-group-kws{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:5px;}
     .memo-group-text{font-size:13px;color:#333;line-height:1.5;white-space:pre-wrap;word-break:break-word;}
     .no-memos{text-align:center;color:#ccc;font-size:14px;padding:40px 0;}
+
+    /* ── Unfinished todos view ── */
+    .unfin-item{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #f0f2f5;}
+    .unfin-item:last-child{border-bottom:none;}
+    .unfin-group-date.overdue{color:var(--red);}
 
     /* ── Settings ── */
     .settings-section{background:#fff;border-radius:14px;padding:18px;margin-bottom:14px;box-shadow:0 2px 10px rgba(0,0,0,.06);}
@@ -288,6 +299,13 @@
     </div>
   </div>
 
+  <div id="viewUnfinished" class="view">
+    <div class="memos-header">
+      <div class="memos-title">미완료 할 일</div>
+    </div>
+    <div id="unfinishedCards"></div>
+  </div>
+
   <div id="viewMemos" class="view">
     <div class="memos-header">
       <div class="memos-title">메모 목록</div>
@@ -325,6 +343,7 @@
 
   <nav class="bottom-nav">
     <button class="nav-item active" data-view="viewCalendar"><span class="ni">📅</span>달력</button>
+    <button class="nav-item" data-view="viewUnfinished"><span class="ni">📌</span>미완료</button>
     <button class="nav-item" data-view="viewMemos"><span class="ni">📝</span>메모</button>
     <button class="nav-item" data-view="viewSettings"><span class="ni">⚙️</span>설정</button>
   </nav>
@@ -556,6 +575,7 @@
         parseSnap(snap);
         renderCalendar();
         if (activeKey) { renderTodoList(); renderEventList(); renderMemoEntries(); }
+        if (currentView === 'viewUnfinished') renderUnfinished();
         if (currentView === 'viewMemos') renderMemos();
       })
     );
@@ -670,6 +690,7 @@
     document.getElementById('calNav').style.display = showCalNav ? '' : 'none';
     document.getElementById('calTitle').style.display = showCalNav ? '' : 'none';
     if (viewId === 'viewCalendar') renderCalendar();
+    if (viewId === 'viewUnfinished') renderUnfinished();
     if (viewId === 'viewMemos') renderMemos();
     if (viewId === 'viewSettings') renderSettings();
   }
@@ -1201,12 +1222,46 @@
     fitCellItems();
   }
 
-  document.getElementById('prevBtn').addEventListener('click', () => {
-    if (--viewMonth < 0) { viewMonth = 11; viewYear--; } renderCalendar();
-  });
-  document.getElementById('nextBtn').addEventListener('click', () => {
-    if (++viewMonth > 11) { viewMonth = 0; viewYear++; } renderCalendar();
-  });
+  function goPrevMonth() { if (--viewMonth < 0) { viewMonth = 11; viewYear--; } renderCalendar(); }
+  function goNextMonth() { if (++viewMonth > 11) { viewMonth = 0; viewYear++; } renderCalendar(); }
+  document.getElementById('prevBtn').addEventListener('click', goPrevMonth);
+  document.getElementById('nextBtn').addEventListener('click', goNextMonth);
+
+  // ── 달력 좌우 스와이프로 월 이동 ──
+  // 세로 스크롤(짧은 화면에서)과 헷갈리지 않게, 가로 이동이 세로보다 뚜렷할 때만 스와이프로 간주.
+  // 스와이프로 판정된 순간부터는 preventDefault로 스크롤을 막고, 터치 종료 시 그 뒤에 이어지는
+  // 합성 click도 함께 막아서 스와이프 도중 지나친 날짜 칸이 모달로 열리지 않게 한다.
+  (function setupCalendarSwipe() {
+    const wrap = document.getElementById('calendarWrap');
+    let startX = 0, startY = 0, tracking = false, swiping = false;
+
+    wrap.addEventListener('touchstart', e => {
+      if (e.touches.length !== 1) return;
+      startX = e.touches[0].clientX; startY = e.touches[0].clientY;
+      tracking = true; swiping = false;
+    }, { passive: true });
+
+    wrap.addEventListener('touchmove', e => {
+      if (!tracking) return;
+      const dx = e.touches[0].clientX - startX;
+      const dy = e.touches[0].clientY - startY;
+      if (!swiping && Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)) swiping = true;
+      if (swiping) e.preventDefault();
+    }, { passive: false });
+
+    wrap.addEventListener('touchend', e => {
+      if (!tracking) return;
+      tracking = false;
+      if (!swiping) return;
+      swiping = false;
+      e.preventDefault();
+      const dx = e.changedTouches[0].clientX - startX;
+      if (Math.abs(dx) < 40) return;
+      if (dx < 0) goNextMonth(); else goPrevMonth();
+    }, { passive: false });
+
+    wrap.addEventListener('touchcancel', () => { tracking = false; swiping = false; });
+  })();
 
   // ── Modal open/close ──
   function openModal(y, m, d) {
@@ -1517,6 +1572,71 @@
       if (textareas.length) textareas[textareas.length - 1].focus();
     }, 50);
   });
+
+  // ── Unfinished todos view ──
+  function renderUnfinished() {
+    document.getElementById('calTitle').style.display = 'none';
+    const container = document.getElementById('unfinishedCards');
+    container.innerHTML = '';
+
+    const todayKey = dateKey(today.getFullYear(), today.getMonth(), today.getDate());
+    const keys = Object.keys(calTodos)
+      .filter(k => (calTodos[k] || []).some(t => !t.done))
+      .sort();
+
+    if (keys.length === 0) { container.innerHTML = '<div class="no-memos">미완료 할 일이 없어요</div>'; return; }
+
+    keys.forEach(key => {
+      const [y, m, d] = key.split('-').map(Number);
+      const dow = new Date(y, m - 1, d).getDay();
+      const items = calTodos[key].filter(t => !t.done);
+      const isPast = key < todayKey;
+
+      const group = document.createElement('div'); group.className = 'memo-date-group';
+      const dateEl = document.createElement('div'); dateEl.className = 'memo-group-date unfin-group-date' + (isPast ? ' overdue' : '');
+      dateEl.textContent = `${y}년 ${m}월 ${d}일 (${WD[dow]})` + (isPast ? ' · 지남' : '') + ` · ${items.length}개`;
+      group.appendChild(dateEl);
+
+      items.forEach(item => {
+        const row = document.createElement('div'); row.className = 'unfin-item';
+
+        const check = document.createElement('div'); check.className = 'todo-check';
+        if (!isReadOnly()) {
+          check.addEventListener('click', e => {
+            e.stopPropagation();
+            item.done = true;
+            saveDate(key);
+          });
+        }
+        row.appendChild(check);
+
+        const text = document.createElement('div'); text.className = 'todo-text';
+        text.textContent = item.text;
+        row.appendChild(text);
+
+        if (!isReadOnly()) {
+          const del = document.createElement('button'); del.className = 'del-btn'; del.textContent = '×';
+          del.addEventListener('click', e => {
+            e.stopPropagation();
+            const arr = calTodos[key];
+            const i = arr.indexOf(item);
+            if (i >= 0) arr.splice(i, 1);
+            if (!arr.length) delete calTodos[key];
+            saveDate(key);
+          });
+          row.appendChild(del);
+        }
+        group.appendChild(row);
+      });
+
+      group.addEventListener('click', () => {
+        viewYear = y; viewMonth = m - 1;
+        switchView('viewCalendar');
+        setTimeout(() => openModal(y, m - 1, d), 80);
+      });
+      container.appendChild(group);
+    });
+  }
 
   // ── Memos view ──
   function renderMemos() {
