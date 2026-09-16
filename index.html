@@ -505,7 +505,20 @@
 
   // 리다이렉트로 돌아온 뒤의 결과 처리. 로그인 성공은 onAuthStateChanged 가 받고,
   // 여기서는 실패 사유를 알려주는 역할만 한다.
-  auth.getRedirectResult().catch(e => alert('로그인 실패: ' + e.message));
+  // ⚠️ 임시 진단 코드 — 모바일에서 로그인이 조용히 실패(에러 없이 로그인 화면 반복)하는
+  // 원인을 알아내기 위한 것으로, 원인 파악 후 제거할 예정.
+  function showLoginDebug(msg) {
+    const el = document.getElementById('setupNotice');
+    el.textContent = '🔍 진단: ' + msg;
+    el.style.display = 'block';
+  }
+  auth.getRedirectResult().then(result => {
+    if (result && result.user) showLoginDebug('리다이렉트 결과 있음 — ' + result.user.email);
+    else showLoginDebug('리다이렉트 결과 없음 (user: null) · currentUser: ' + (auth.currentUser ? auth.currentUser.email : '없음'));
+  }).catch(e => {
+    showLoginDebug('리다이렉트 에러 [' + e.code + '] ' + e.message);
+    alert('로그인 실패: ' + e.message);
+  });
 
   document.getElementById('signOutBtn').addEventListener('click', () => auth.signOut());
 
