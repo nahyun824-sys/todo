@@ -7,6 +7,7 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
     *{margin:0;padding:0;box-sizing:border-box;}
     :root{--primary:#667eea;--red:#f56565;--green:#68d391;--gray:#f0f2f5;--nav:64px;}
@@ -494,30 +495,41 @@
     }
   });
 
-  // 팝업 대신 리다이렉트 로그인 — 팝업 방식은 인증 중계 iframe이 서드파티 저장소를
-  // 써서, 브라우저가 이를 막으면 sessionStorage 오류로 로그인이 실패한다.
+  // Google Identity Services 로 직접 로그인 — Firebase의 signInWithPopup/Redirect는 둘 다
+  // firebaseapp.com(authDomain)을 거치는 저장소 중계에 의존하는데, 이 앱의 접속 도메인
+  // (github.io)과 달라서 모바일 브라우저의 서드파티 저장소 차단에 걸려 조용히 실패했다.
+  // GIS로 액세스 토큰을 직접 받아 signInWithCredential 로 넘기면 그 중계를 거치지 않는다.
+  const GOOGLE_CLIENT_ID = '1095838509318-0gdh9n8o011sc2ktgd7uudc2qh2n99at.apps.googleusercontent.com';
   const loginBtn = document.getElementById('googleLoginBtn');
-  loginBtn.addEventListener('click', () => {
-    loginBtn.disabled = true;
-    auth.signInWithRedirect(new firebase.auth.GoogleAuthProvider())
-      .catch(e => { loginBtn.disabled = false; alert('로그인 실패: ' + e.message); });
-  });
+  let googleTokenClient = null;
 
-  // 리다이렉트로 돌아온 뒤의 결과 처리. 로그인 성공은 onAuthStateChanged 가 받고,
-  // 여기서는 실패 사유를 알려주는 역할만 한다.
-  // ⚠️ 임시 진단 코드 — 모바일에서 로그인이 조용히 실패(에러 없이 로그인 화면 반복)하는
-  // 원인을 알아내기 위한 것으로, 원인 파악 후 제거할 예정.
-  function showLoginDebug(msg) {
-    const el = document.getElementById('setupNotice');
-    el.textContent = '🔍 진단: ' + msg;
-    el.style.display = 'block';
+  function initGoogleTokenClient() {
+    if (googleTokenClient || !window.google || !google.accounts || !google.accounts.oauth2) return;
+    googleTokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: 'email profile',
+      callback: resp => {
+        if (resp.error) { loginBtn.disabled = false; alert('로그인 실패: ' + resp.error); return; }
+        const credential = firebase.auth.GoogleAuthProvider.credential(null, resp.access_token);
+        auth.signInWithCredential(credential).catch(e => {
+          loginBtn.disabled = false;
+          alert('로그인 실패: ' + e.message);
+        });
+      },
+      error_callback: err => {
+        loginBtn.disabled = false;
+        if (err && err.type !== 'popup_closed') alert('로그인 실패: ' + (err.message || err.type));
+      }
+    });
   }
-  auth.getRedirectResult().then(result => {
-    if (result && result.user) showLoginDebug('리다이렉트 결과 있음 — ' + result.user.email);
-    else showLoginDebug('리다이렉트 결과 없음 (user: null) · currentUser: ' + (auth.currentUser ? auth.currentUser.email : '없음'));
-  }).catch(e => {
-    showLoginDebug('리다이렉트 에러 [' + e.code + '] ' + e.message);
-    alert('로그인 실패: ' + e.message);
+  window.addEventListener('load', initGoogleTokenClient);
+
+  // 팝업 차단을 피하려면 클릭 이벤트 안에서 곧바로(await 없이) requestAccessToken을 불러야 한다.
+  loginBtn.addEventListener('click', () => {
+    if (!googleTokenClient) initGoogleTokenClient();
+    if (!googleTokenClient) { alert('로그인 준비 중이에요. 잠시 후 다시 눌러주세요.'); return; }
+    loginBtn.disabled = true;
+    googleTokenClient.requestAccessToken();
   });
 
   document.getElementById('signOutBtn').addEventListener('click', () => auth.signOut());
