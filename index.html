@@ -112,12 +112,6 @@
       .calendar-wrap{border-radius:0;}
       .days-grid{border-left:none;}
     }
-    /* 모바일은 입력창 글자가 16px 미만이면 포커스할 때 브라우저가 화면을 확대해버림 —
-       모달 안 입력창들만 16px로 올려서 막는다 (확대만 막는 목적이라 모바일에서만 적용). */
-    @media (max-width:600px){
-      .add-input, .time-input, .todo-edit-input, .event-edit-input,
-      .memo-textarea, .kw-add-input{ font-size:16px; }
-    }
 
     /* ── Memos view ── */
     .memos-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
@@ -249,6 +243,23 @@
     .cpick{width:20px;height:20px;border-radius:50%;border:2px solid transparent;cursor:pointer;transition:transform .12s;}
     .cpick.sel{border-color:#333;transform:scale(1.2);}
     .kw-add-btn{background:var(--primary);color:#fff;border:none;border-radius:9px;padding:8px 13px;font-size:13px;cursor:pointer;}
+
+    /* ── 모바일 화면 확대(줌) 방지 ── */
+    /* 입력창 글자가 16px 미만이면 브라우저가 포커스하는 순간 화면을 확대해버린다.
+       스타일시트 맨 끝 + !important 인 이유: 개별 입력창마다 .클래스{font-size:13px} 가
+       따로 걸려 있어서, 앞쪽에 두거나 요소 선택자로 쓰면 그 규칙들에 덮여 무효가 된다.
+       나중에 입력창을 새로 추가해도 자동으로 걸리게 요소 선택자로 전부 잡는다. */
+    @media (max-width:600px){
+      input, textarea, select{ font-size:16px!important; }
+      /* 글자가 커진 만큼 시간 입력칸도 넓혀야 값이 잘리지 않음 */
+      .time-input{ width:112px; }
+    }
+    /* 빠르게 두 번 눌리기 쉬운 요소의 더블탭 확대를 막는다. 핀치 확대는 그대로 둔다.
+       (드래그 핸들은 스크롤까지 막아야 해서 touch-action:none 을 그대로 둔다) */
+    button, input, textarea, select, .day-cell, .todo-check, .todo-text,
+    .memo-date-group, .unfin-item, .mkwchip, .kwchip, .cpick{
+      touch-action:manipulation;
+    }
   </style>
 </head>
 <body>
@@ -1486,7 +1497,7 @@
   function editEventInline(ev, rowEl, timeBadge, titleEl) {
     const timeInput = document.createElement('input');
     timeInput.type = 'time'; timeInput.value = ev.time || '';
-    timeInput.className = 'time-input'; timeInput.style.width = '90px';
+    timeInput.className = 'time-input';
     const titleInput = document.createElement('input');
     titleInput.className = 'event-edit-input'; titleInput.value = ev.title;
     timeBadge.style.display = 'none'; titleEl.style.display = 'none';
