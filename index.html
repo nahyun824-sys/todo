@@ -1307,7 +1307,7 @@
     document.getElementById('addInput').value = '';
     renderTodoList(); renderEventList(); renderMemoEntries();
     document.getElementById('overlay').classList.add('open');
-    if (!isReadOnly()) document.getElementById('addInput').focus();
+    autoFocus('addInput');
     renderCalendar();
   }
   function closeModal() {
@@ -1319,14 +1319,22 @@
     if (e.target === document.getElementById('overlay')) closeModal();
   });
 
+  // 탭을 열 때의 자동 포커스는 마우스·키보드 환경에서만 — 폰에서는 탭을 옮길 때마다
+  // 키보드가 올라오면서 화면이 확대되고 스크롤이 튄다. 입력은 사용자가 직접 탭하면 된다.
+  const isTouchDevice = window.matchMedia('(hover:none) and (pointer:coarse)').matches;
+  function autoFocus(id) {
+    if (isTouchDevice || isReadOnly()) return;
+    setTimeout(() => document.getElementById(id).focus(), 50);
+  }
+
   function switchTab(tab) {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
     ['todo','event','memo'].forEach(t => {
       document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1))
         .classList.toggle('active', t === tab);
     });
-    if (tab === 'todo' && !isReadOnly()) setTimeout(() => document.getElementById('addInput').focus(), 50);
-    if (tab === 'event' && !isReadOnly()) setTimeout(() => document.getElementById('eventTitleInput').focus(), 50);
+    if (tab === 'todo')  autoFocus('addInput');
+    if (tab === 'event') autoFocus('eventTitleInput');
   }
   document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
 
